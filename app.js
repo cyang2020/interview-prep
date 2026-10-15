@@ -5,14 +5,18 @@
 
   // ---------------------------------------------------------------- state
   const state = {
-    file: "solution.py",
-    mode: null,              // diff | full；null = 按默认（第一问看完整代码，其余看对比）
+    view: null,              // 代码栏在看什么：diff | full | tests；null = 按默认（第一问看完整代码，其余看对比）
     base: null,              // 对比基准：step index，null = 上一问
-    collapse: true,
-    ws: true,                // 对比时忽略空白（注释对齐这种改动不算改动）
+    collapse: true,          // 对比时只看改动附近
+    ws: true,                // 对比时忽略空白
+    wrap: null,              // 代码长行是否折行；null = 窄屏折行、宽屏不折
+    testsDiff: false,        // 测试用例视图：只看相对基准新增的
+    pane: "notes",           // 窄屏（放不下两栏）时看哪一栏：notes | code
     expanded: new Set(),     // 已展开的折叠段 "from-to"
   };
   const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const twoCols = () => window.innerWidth >= 720;
+  const wrapOn = () => state.wrap === null ? window.innerWidth < 1200 : state.wrap;
 
   function route() {
     const h = location.hash.replace(/^#/, "");
@@ -70,10 +74,11 @@
     const f = step && step.files.find(f => f.name === name);
     return f ? f.content : "";
   }
+  const tableOpen = () => `<table class="code${wrapOn() ? " wrap" : ""}">`;
 
   function renderFull(text) {
     const lines = text.replace(/\n$/, "").split("\n");
-    let h = '<table class="code">';
+    let h = tableOpen();
     lines.forEach((s, i) => { h += `<tr><td class="ln">${i + 1}</td><td class="mk"></td><td>${hl(s)}</td></tr>`; });
     return h + "</table>";
   }
@@ -95,7 +100,7 @@
         for (let d = -CONTEXT; d <= CONTEXT; d++) if (ops[k + d]) show[k + d] = true;
       });
     }
-    let h = '<table class="code">', k = 0;
+    let h = tableOpen(), k = 0;
     const row = o => {
       const cls = o.t === "add" ? "add" : o.t === "del" ? "del" : "";
       const mk = o.t === "add" ? "+" : o.t === "del" ? "−" : "";
@@ -113,13 +118,28 @@
     return { html: h + "</table>", adds, dels };
   }
 
+  // 思路正文：核心思路 / 思考与反问 / 测试要点 直接展示，其余小节默认折叠
+  const OPEN_SECTIONS = new Set(["这一问要做什么", "核心思路", "思考与反问", "测试要点"]);
+  function notesBody(html) {
+    const parts = html.split(/(?=<h2>)/);
+    const hasNew = parts.some(p => { const m = p.match(/^<h2>(.*?)<\/h2>/); return m && OPEN_SECTIONS.has(m[1].trim()); });
+    if (!hasNew) return html;
+    let out = "", folded = "";
+    for (const p of parts) {
+      const m = p.match(/^<h2>(.*?)<\/h2>/);
+      if (!m || OPEN_SECTIONS.has(m[1].trim())) out += p;
+      else folded += p.replace(/^<h2>(.*?)<\/h2>/, "");
+    }
+    if (folded.trim()) out += `<details class="more"><summary>更多说明</summary><div class="morebody">${folded}</div></details>`;
+    return out;
+  }
+
   function sidebar(problem) {
     const items = PROBLEMS.map(p => {
       const m = p.meta || {};
       return `<li><a href="#${p.id}/problem" class="${problem && p.id === problem.id ? "active" : ""}">
         <div class="t">${esc(m.title_zh || m.title || p.id)}</div>
         <div class="s">${esc(m.title && m.title_zh ? m.title : "")}</div>
-        <div class="tags"><span class="chip co">${esc(m.company || "")}</span>${(m.tags || []).map(t => `<span class="chip">${esc(t)}</span>`).join("")}</div>
       </a></li>`;
     }).join("");
     return `<aside class="sidebar"><h1>Interview Prep</h1><ul class="plist">${items}</ul></aside>`;
@@ -127,63 +147,72 @@
 
   function header(problem, view) {
     const m = problem.meta || {};
-    const chips = [m.company, m.stage, m.frequency, m.last_asked && `last asked ${m.last_asked}`].filter(Boolean)
-      .map(x => `<span class="chip">${esc(x)}</span>`).join("");
     const tab = (id, label, sub) => `<a href="#${problem.id}/${id}" class="${view === id ? "active" : ""}">${label}${sub ? `<span class="sub">${esc(sub)}</span>` : ""}</a>`;
     const tabs = [tab("problem", "题面"), tab("overview", "整体思路")]
       .concat(problem.steps.map((s, i) => tab(`s${i + 1}`, esc(s.label), s.subtitle))).join("");
-    const psel = `<div class="psel"><select data-set="problem">${PROBLEMS.map(p => `<option value="${p.id}" ${p.id === problem.id ? "selected" : ""}>${esc((p.meta || {}).title_zh || (p.meta || {}).title || p.id)}</option>`).join("")}</select></div>`;
-    return `<header class="phead">${psel}<h2>${esc(m.title_zh || m.title || problem.id)} <span style="color:var(--muted);font-weight:400;font-size:15px">${esc(m.title_zh ? m.title : "")}</span></h2>
-      <div class="meta">${chips}</div><nav class="tabs">${tabs}</nav></header>`;
+    const psel = `<select class="psel" data-set="problem">${PROBLEMS.map(p => `<option value="${p.id}" ${p.id === problem.id ? "selected" : ""}>${esc((p.meta || {}).title_zh || (p.meta || {}).title || p.id)}</option>`).join("")}</select>`;
+    return `<header class="phead">
+      <div class="titlebar">${psel}<h2 class="ptitle">${esc(m.title_zh || m.title || problem.id)}<span class="en">${esc(m.title_zh ? m.title : "")}</span></h2></div>
+      <nav class="tabs">${tabs}</nav></header>`;
   }
 
   function stepView(problem, idx) {
     const step = problem.steps[idx];
     const baseIdx = state.base === null ? idx - 1 : state.base;
     const base = baseIdx >= 0 && baseIdx < problem.steps.length && baseIdx !== idx ? problem.steps[baseIdx] : null;
-    const mode = state.mode || (idx === 0 ? "full" : "diff");   // 第一问没有上一问，默认看完整代码
+    const view = state.view || (idx === 0 ? "full" : "diff");   // 第一问没有上一问，默认看完整代码
+    const tr = step.testResult;
 
-    const fileNames = step.files.map(f => f.name);
-    if (!fileNames.includes(state.file)) state.file = fileNames[0] || "";
-    const cur = fileOf(step, state.file);
-
-    let body, stats = "";
-    if (mode === "diff") {
-      const r = renderDiff(base ? fileOf(base, state.file) : "", cur);
+    const sol = fileOf(step, "solution.py"), tests = fileOf(step, "tests.py");
+    let body, stats = "", banner = "";
+    if (view === "diff") {
+      const r = renderDiff(base ? fileOf(base, "solution.py") : "", sol);
       body = r.html;
       stats = `<span class="stats"><span class="a">+${r.adds}</span><span class="d">−${r.dels}</span></span>`;
+    } else if (view === "full") {
+      body = sol ? renderFull(sol) : '<div class="empty">这一步没有 solution.py</div>';
     } else {
-      body = cur ? renderFull(cur) : '<div class="empty">这一步没有这个文件</div>';
+      if (tr) banner = `<div class="testbanner ${tr.ok ? "ok" : "bad"}">${tr.ok ? "✓ " : "✗ "}${esc(tr.ok ? (tr.output || "").trim().split("\n").pop() || "测试通过" : "测试失败")}</div>` + (tr.ok ? "" : `<pre class="testout">${esc(tr.output || "")}</pre>`);
+      if (!tests) body = '<div class="empty">这一步没有 tests.py</div>';
+      else if (state.testsDiff) {
+        const r = renderDiff(base ? fileOf(base, "tests.py") : "", tests);
+        body = r.html;
+        stats = `<span class="stats"><span class="a">+${r.adds}</span><span class="d">−${r.dels}</span></span>`;
+      } else body = renderFull(tests);
     }
 
     const baseOpts = problem.steps.map((s, i) => i === idx ? "" :
       `<option value="${i}" ${i === baseIdx ? "selected" : ""}>${esc(s.label)}${i === idx - 1 ? "（上一问）" : ""}</option>`).join("")
-      + `<option value="-1" ${baseIdx < 0 ? "selected" : ""}>空文件（从零开始）</option>`;
-    const fileOpts = fileNames.map(n => `<option value="${esc(n)}" ${n === state.file ? "selected" : ""}>${esc(n)}</option>`).join("");
-
-    const tr = step.testResult;
-    const testChip = tr ? `<span class="testchip ${tr.ok ? "ok" : "bad"}" title="${esc(tr.output || "")}">${tr.ok ? "测试通过" : "测试失败"}${tr.output ? "：" + esc(tr.output.split("\n").pop()) : ""}</span>` : "";
-    const testOut = tr && !tr.ok ? `<pre class="testout">${esc(tr.output)}</pre>` : "";
+      + `<option value="-1" ${baseIdx < 0 ? "selected" : ""}>空文件</option>`;
+    const diffOpts = `<label>基准 <select data-set="base">${baseOpts}</select></label>
+          <label><input type="checkbox" data-set="collapse" ${state.collapse ? "checked" : ""}> 折叠未变</label>
+          <label><input type="checkbox" data-set="ws" ${state.ws ? "checked" : ""}> 忽略空白</label>`;
+    const dot = tr ? `<i class="dot ${tr.ok ? "ok" : "bad"}"></i>` : "";
 
     const prev = idx > 0 ? `<a href="#${problem.id}/s${idx}">← ${esc(problem.steps[idx - 1].label)}</a>` : `<a href="#${problem.id}/overview">← 整体思路</a>`;
     const next = idx + 1 < problem.steps.length ? `<a href="#${problem.id}/s${idx + 2}">${esc(problem.steps[idx + 1].label)} →</a>` : `<span class="dis">已是最后一问</span>`;
 
-    return `<div class="step">
-      <article class="notes md">${step.notesHtml}</article>
+    const pane = twoCols() ? "both" : state.pane;
+    const paneBar = twoCols() ? "" : `<div class="panebar"><span class="seg">
+        <button data-pane="notes" class="${pane === "notes" ? "on" : ""}">思路</button>
+        <button data-pane="code" class="${pane === "code" ? "on" : ""}">代码${dot}</button></span></div>`;
+
+    return `${paneBar}<div class="step pane-${pane}">
+      <article class="notes md">${notesBody(step.notesHtml)}<nav class="stepnav innotes">${prev}${next}</nav></article>
       <section class="codecol">
         <div class="toolbar">
-          <label>文件 <select data-set="file">${fileOpts}</select></label>
           <span class="seg">
-            <button data-mode="diff" class="${mode === "diff" ? "on" : ""}">对比</button>
-            <button data-mode="full" class="${mode === "full" ? "on" : ""}">完整代码</button>
+            <button data-view="diff" class="${view === "diff" ? "on" : ""}">对比</button>
+            <button data-view="full" class="${view === "full" ? "on" : ""}">完整代码</button>
+            <button data-view="tests" class="${view === "tests" ? "on" : ""}">测试用例${dot}</button>
           </span>
-          ${mode === "diff" ? `<label>基准 <select data-set="base">${baseOpts}</select></label>
-          <label><input type="checkbox" data-set="collapse" ${state.collapse ? "checked" : ""}> 只看改动附近</label>
-          <label><input type="checkbox" data-set="ws" ${state.ws ? "checked" : ""}> 忽略空白</label>${stats}` : ""}
-          ${testChip}
+          ${view === "diff" ? diffOpts : ""}
+          ${view === "tests" ? `<label><input type="checkbox" data-set="testsDiff" ${state.testsDiff ? "checked" : ""}> 只看本问新增</label>${state.testsDiff ? diffOpts : ""}` : ""}
+          ${stats}
+          <label class="right"><input type="checkbox" data-set="wrap" ${wrapOn() ? "checked" : ""}> 折行</label>
         </div>
+        ${banner}
         <div class="codeview">${body}</div>
-        ${testOut}
         <nav class="stepnav">${prev}${next}</nav>
       </section>
     </div>`;
@@ -198,12 +227,16 @@
     else content = `<div class="content">${stepView(problem, parseInt(view.slice(1), 10) - 1)}</div>`;
     app.innerHTML = sidebar(problem) + `<main class="main">${header(problem, view)}${content}</main>`;
     document.title = `${(problem.meta || {}).title_zh || problem.id} · Interview Prep`;
+    const act = app.querySelector(".tabs a.active");
+    if (act && act.scrollIntoView) act.scrollIntoView({ block: "nearest", inline: "center" });
   }
 
   // ---------------------------------------------------------------- events
   app.addEventListener("click", e => {
-    const b = e.target.closest("button[data-mode]");
-    if (b) { state.mode = b.dataset.mode; render(); return; }
+    const v = e.target.closest("button[data-view]");
+    if (v) { state.view = v.dataset.view; state.expanded.clear(); render(); return; }
+    const p = e.target.closest("button[data-pane]");
+    if (p) { state.pane = p.dataset.pane; render(); return; }
     const f = e.target.closest("tr.fold");
     if (f) { state.expanded.add(f.dataset.fold); render(); }
   });
@@ -212,12 +245,15 @@
     if (!el) return;
     const k = el.dataset.set;
     if (k === "problem") { location.hash = `#${el.value}/problem`; return; }
-    if (k === "file") state.file = el.value;
-    else if (k === "base") { state.base = parseInt(el.value, 10); state.expanded.clear(); state.mode = "diff"; }
+    if (k === "base") { state.base = parseInt(el.value, 10); state.expanded.clear(); }
     else if (k === "collapse") { state.collapse = el.checked; state.expanded.clear(); }
     else if (k === "ws") { state.ws = el.checked; state.expanded.clear(); }
+    else if (k === "wrap") state.wrap = el.checked;
+    else if (k === "testsDiff") { state.testsDiff = el.checked; state.expanded.clear(); }
     render();
   });
   window.addEventListener("hashchange", () => { state.base = null; state.expanded.clear(); render(); });
+  let lastCols = twoCols();
+  window.addEventListener("resize", () => { if (twoCols() !== lastCols) { lastCols = twoCols(); render(); } });
   render();
 })();
