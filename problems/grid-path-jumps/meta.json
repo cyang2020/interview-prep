@@ -1,0 +1,10 @@
+{
+  "title": "Grid Path Max Score with Limited Jumps",
+  "title_zh": "网格下行取最大分（限次跳跃）",
+  "company": "OpenAI",
+  "stage": "prep 站未标轮次",
+  "frequency": "prep 站未标频率",
+  "last_asked": "",
+  "tags": ["grid", "dynamic-programming", "path-reconstruction", "counting", "state-compression"],
+  "language": "python"
+}
