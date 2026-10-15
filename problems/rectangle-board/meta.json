@@ -1,0 +1,10 @@
+{
+  "title": "RectangleBoard",
+  "title_zh": "矩形画板",
+  "company": "OpenAI",
+  "stage": "phone-screen · onsite-coding",
+  "frequency": "Medium · New",
+  "last_asked": "2026-10-15",
+  "tags": ["grid", "stack", "undo", "api-design"],
+  "language": "python"
+}

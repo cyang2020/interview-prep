@@ -1,0 +1,10 @@
+{
+  "title": "Social Network (snapshot variant)",
+  "title_zh": "社交关注图（快照版）",
+  "company": "OpenAI",
+  "stage": "phone-screen · onsite-coding",
+  "frequency": "Very high",
+  "last_asked": "2026-08-14",
+  "tags": ["graph", "hashmap", "snapshot", "immutability"],
+  "language": "python"
+}

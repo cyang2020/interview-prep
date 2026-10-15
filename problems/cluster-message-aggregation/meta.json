@@ -1,0 +1,10 @@
+{
+  "title": "Design Cluster Message Aggregation",
+  "title_zh": "集群消息汇总：树形分布式计数与拓扑重建",
+  "company": "OpenAI",
+  "stage": "screening (coding)",
+  "frequency": "Hard · prep 站未标频率",
+  "last_asked": "2026-10-12",
+  "tags": ["tree", "message-passing", "async", "aggregation", "retry", "concurrency"],
+  "language": "python"
+}

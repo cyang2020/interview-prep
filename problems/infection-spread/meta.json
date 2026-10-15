@@ -1,0 +1,15 @@
+{
+  "title": "Infection Spread / Cellular Automata",
+  "title_zh": "感染传播与细胞自动机",
+  "company": "OpenAI",
+  "stage": "phone-screen · tech-screen",
+  "frequency": "Very high",
+  "last_asked": "2026-09-26",
+  "tags": [
+    "grid",
+    "multi-source-bfs",
+    "simulation",
+    "dynamic-programming"
+  ],
+  "language": "python"
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Fault-Tolerant Work Queue",
+  "title_zh": "容错工作队列",
+  "company": "OpenAI",
+  "stage": "phone-screen · onsite-coding",
+  "frequency": "Medium · New",
+  "last_asked": "2026-10-02",
+  "tags": ["queue", "state-machine", "retry", "DAG"],
+  "language": "python"
+}

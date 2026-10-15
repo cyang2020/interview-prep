@@ -1,0 +1,10 @@
+{
+  "title": "Social Network / Follow Graph (timestamped)",
+  "title_zh": "社交关注图（带时间戳）",
+  "company": "OpenAI",
+  "stage": "phone-screen · onsite-coding",
+  "frequency": "Very high",
+  "last_asked": "2026-08-14",
+  "tags": ["graph", "hashmap", "binary-search", "time-travel"],
+  "language": "python"
+}
