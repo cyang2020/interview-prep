@@ -1,0 +1,10 @@
+{
+  "title": "Delayed-Feedback Number Guessing",
+  "title_zh": "延迟一拍的猜数字",
+  "company": "OpenAI",
+  "stage": "onsite-coding",
+  "frequency": "New",
+  "last_asked": "2026-10",
+  "tags": ["binary-search", "fibonacci", "pipelining", "batch", "state-machine"],
+  "language": "python"
+}
