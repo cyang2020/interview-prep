@@ -8,5 +8,5 @@ git add -A
 git diff --cached --quiet || git commit -m "${1:-更新题库}"
 git push origin main
 site_commit=$(git subtree split --prefix site main 2>/dev/null | tr -d '\r' | grep -o '[0-9a-f]\{40\}' | tail -1)
-git push origin "$site_commit:refs/heads/gh-pages" --force
+git push origin "${site_commit}:refs/heads/gh-pages" --force
 echo "已发布：https://cyang2020.github.io/interview-prep/"
