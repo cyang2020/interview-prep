@@ -7,5 +7,5 @@ python3 build.py
 git add -A
 git diff --cached --quiet || git commit -m "${1:-更新题库}"
 git push origin main
-git push origin "$(git subtree split --prefix site main):gh-pages" --force
+git push origin "$(git subtree split --prefix site main 2>/dev/null | tail -1):refs/heads/gh-pages" --force
 echo "已发布：https://cyang2020.github.io/interview-prep/"
