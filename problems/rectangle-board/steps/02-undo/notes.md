@@ -1,91 +1,63 @@
 # 第2问：undo
 
-## 面试官给的骨架
+## 这一问要做什么
 
-```
-boolean undo()
-```
+- 加 undo()：撤销最近一次改动过板子的操作，返回 true；没有可撤的返回 false。
+- 成功的 addRectangle 和成功的 removeRectangle 各算一次改动，撕掉被完全压住、画面没变的也算；失败的 remove、getAt、undo 本身不算。
+- 撤销一次 add 之后，下一次 add 的编号照样往上发，不回退。
 
-其余方法签名不变，行为也不变，只是成功的 add 和成功的 remove 要留下记录。
+## 核心思路
 
-## 思路
+- 接口加一个 undo()。其余方法签名不变，只是 addRectangle 和 removeRectangle 成功时各多一行写历史。
+- 新增 history 栈，每条是 ("add" 或 "remove", [编号列表])，回答"最近一次改动板子的操作是什么、涉及哪些编号"。坐标不存，矩形对象没删过；层次不存，编号就是层次。
+- 哪些进历史：addRectangle 必进；removeRectangle 只在翻了 active 之后进，return False 那条路不进；getAt 不碰 history。
+- undo：history 空返回 False；否则 pop 一条，alive = action == "remove"，把 ids 里每个编号的 active 设成 alive，返回 True。撤销后不再 append，所以 undo 自己不占历史。
+- 编号不回退：rid 仍来自 len(rects) + 1，撤销 add 只把 active 改成 False，不从 rects 弹元素，下一次 add 继续往上发。
+- 编号那一项从这一问就写成列表，虽然现在每条只有一个编号：第四问 batchRemove 一条记录装 n 个编号，undo 一行不用改。
+- 复杂度：undo O(k)，k 是这条记录里的编号数，这一问恒为 1；add、remove 各多一次 append，仍 O(1)；history 内存 O(操作数)。
 
-### 开口先定的口径
+## 思考与反问
 
-题目在这一问给的判定规则很细，先逐条确认，每一条都直接对应代码里的一行：
+- 被完全压住的矩形被撕掉、画面没变，算一次改动吗？按算，removeRectangle 写历史不看可见性。不算的话：1、2 都铺满，removeRectangle(1) 后 undo 会撤销 add[2]，两张全丢。
+- 失败的 remove、getAt 算不算？按不算。写历史那行放在 return False 之后，getAt 里没有 history。算了的话之后每次 undo 都错位一格。
+- 要 redo 吗？按不要，一个栈够。要的话再开一个 redo 栈，undo 时把弹出的记录压进去，任何新的 add / remove 把它清空。
+- 为什么恢复 remove 时不用存"原来在第几层"：三张铺满，removeRectangle(2) 再 undo，getAt(1,1) 还是 3；2 回到 1 上、3 下，是因为 1 < 2 < 3，不是因为记了位置。加了 bringToFront 这条就不成立。
+- 撤销 add[5] 时 5 会不会已经被撕掉了：不会。撕 5 的 remove[5] 一定压在 add[5] 之上，栈先弹 remove[5] 复活 5 再轮到 add[5]；第二次撕同一张返回 False 不记历史，所以栈里一张矩形最多一条 remove。undo 里不需要校验。
 
-| 规则 | 代码里怎么体现 |
-|---|---|
-| 成功的 add 算一条 | `addRectangle` 末尾写历史 |
-| 成功的 remove 算一条，哪怕它被完全压住、画面没变 | `removeRectangle` 翻标记后写历史，不看可见性 |
-| 失败的 remove 不算 | 写历史那行放在 `return False` 之后 |
-| `getAt` 不算 | `getAt` 不碰 history |
-| 成功的 `undo` 吃掉它撤销的那条，自己不留记录 | `history.pop()`，之后不 append |
-| 编号不回退 | 编号仍然来自 `len(self.rects) + 1`，而撤销 add 不从 `rects` 里删元素 |
+## 测试要点
 
-还要问一句：需要 redo 吗？题目没要求，所以一个栈够了。要是需要，再加一个栈即可。
+- test_undo_official_example：removeRectangle(1) 在画面不变时也算一条；三次 undo 依次放回 1、撤销 add 2、撤销 add 1，第四次返回 False。
+- test_failed_remove_writes_no_history：removeRectangle(77) 和第二次 removeRectangle(1) 都不占历史，两次 undo 后历史就空了。
+- test_getat_writes_no_history：两次 getAt 后第一次 undo 撤销的仍是 add。
+- test_undo_does_not_create_history：add 后 undo 成功，再 undo 返回 False，undo 自己不是一条可撤销的操作。
+- test_ids_keep_increasing_after_undo：撤销 add 2 后下一次 add 发 3；此时 removeRectangle(2) 返回 False。
+- test_undo_restores_stacking_position：三张铺满，removeRectangle(2) 再 undo，getAt(1,1) 还是 3；移除 3 后才是 2。
 
-### 历史里存什么
-
-一条记录只要两样东西：**这次是贴还是撕，涉及哪些编号**。坐标不用存，因为矩形对象从来没删过。叠放位置也不用存，因为编号就是叠放位置。
-
-于是撤销变成一个对称的动作：
-
-- 撤销一次 add → 把这些编号改成不活跃
-- 撤销一次 remove → 把这些编号改成活跃
-
-两边都只是给 `active` 赋一个布尔值，代码里就一行 `alive = action == "remove"`。
-
-编号这一项现在写成**列表**，虽然这一问每条记录里只有一个编号。这是为第四问的批量移除留的位置：到那时 `undo` 一行都不用改。不这么写，第四问就得给 undo 加一个分支去区分"单个"和"一批"。
+## 更多说明
 
 ### 走一遍题目的例子
 
-4 列 3 行，`add(1,0,2,1)` → 1，`add(2,1,3,2)` → 2，然后 `removeRectangle(1)`。注意这一步画面完全没变，因为 `(2,1)` 上面还盖着 2，而 1 的其他格子本来就只有它自己——但记录照样要留。
+4 列 3 行，add(1,0,2,1) 发 1，add(2,1,3,2) 发 2，然后 removeRectangle(1)。这一步画面完全没变：(2,1) 上还盖着 2，1 的其他格子本来就只有它自己。
 
-| 调用 | 历史栈（左旧右新） | 活跃的编号 | 返回 |
+| 调用 | history（左旧右新） | active 的编号 | 返回 |
 |---|---|---|---|
 | add → 1 | add[1] | 1 | 1 |
 | add → 2 | add[1], add[2] | 1,2 | 2 |
-| removeRectangle(1) | add[1], add[2], remove[1] | 2 | true |
-| undo | add[1], add[2] | 1,2 | true |
-| getAt(2,1) | 不变 | 1,2 | 2 |
-| undo | add[1] | 1 | true |
-| getAt(2,1) | 不变 | 1 | 1 |
-| undo | 空 | 无 | true |
-| undo | 空 | 无 | false |
+| removeRectangle(1) | add[1], add[2], remove[1] | 2 | True |
+| undo | add[1], add[2] | 1,2 | True |
+| undo | add[1] | 1 | True |
+| undo | 空 | 无 | True |
+| undo | 空 | 无 | False |
 
-第四行是整问的点：`undo` 只把 1 的 `active` 改回 True，没有任何"插回第几层"的动作，而 `getAt(2,1)` 立刻又变回 2——因为 2 的编号更大。
+第四行 undo 只把 1 的 active 改回 True，没有"插回第几层"的动作，这时 getAt(2,1) 是 2，因为 2 的编号更大。
 
-### 一个不用校验的不变量
+### 规则对照代码
 
-有人会担心：撤销一条 `add[5]` 的时候，万一编号 5 此刻已经被撕掉了，那不就把一个已经不活跃的改成不活跃？
-
-不会发生。撕掉 5 的那条 `remove[5]` 一定压在 `add[5]` 之上（时间上更晚），栈是后进先出，所以一定先撤销 `remove[5]` 把 5 复活，才轮到 `add[5]`。再加上"第二次撕同一张返回 false 且不记历史"，一张矩形最多只有一条 remove 记录。所以 `undo` 里不需要任何一致性检查。
-
-### 复杂度
-
-`undo` 是 O(k)，k 是这条记录里的编号个数（这一问恒等于 1）。add / remove 各多一次 append，仍是 O(1)。内存多了历史栈 O(操作数)。
-
-## 常见疑问
-
-### 被完全压住的矩形被撕掉，画面没变，为什么也算一次操作
-
-题目原话：Removing an active rectangle counts as a change even when another rectangle completely covers it。判定看的是板子的内容变了没有，不是看画面变了没有。
-
-举个最小例子：矩形 1 和矩形 2 都是 `(0,0)-(2,2)` 铺满整板。`removeRectangle(1)` 之后，每一格的 `getAt` 都还是 2，一个像素都没变，但记录必须留下。不留的话接下来一次 `undo` 会跑去撤销 `add[2]`，结果变成 1 和 2 都不在板上——两张都丢了。
-
-### 撤销了编号 2 的添加，下一次 add 发几号
-
-发 3。题目原话：IDs assigned by later additions continue increasing even if an earlier addition has been undone。
-
-代码里这一点是自动成立的：编号来自 `len(self.rects) + 1`，而撤销 add 只是把 `active` 改成 False，并不把元素从 `rects` 里弹出来。所以长度不变，下一个编号继续往上走。顺带一个推论：这时 `removeRectangle(2)` 返回 false，因为 2 不活跃。
-
-### 为什么不需要把"原来的叠放位置"存下来
-
-因为位置不是一个独立的状态。矩形 2 在矩形 1 之上、矩形 3 之下，这件事完全由 1 < 2 < 3 决定。只要 `rects` 里的对象和它的编号没动过，把 `active` 翻回 True 的那一刻，它就自动回到原来那一层。
-
-如果面试官加一个 `bringToFront(id)`，这条就不成立了——那时要另开一个只增的层次序号，`getAt` 比层次序号而不是比编号。
-
-### 能不能 undo 完再 undo 回来（redo）
-
-题目没要求。要加就再开一个栈：`undo` 时把弹出的记录压进 redo 栈，`redo` 时反着做一遍；任何新的 add / remove / removeAt / batchRemove 把 redo 栈清空。现有结构不用改。
+| 规则 | 代码里哪一行 |
+|---|---|
+| 成功的 add 算一条 | addRectangle 末尾 history.append(("add", [rid])) |
+| 成功的 remove 算一条，不看可见性 | removeRectangle 翻 active 后 history.append(("remove", [rectangleId])) |
+| 失败的 remove 不算 | 写历史那行在 return False 之后 |
+| getAt 不算 | getAt 不碰 history |
+| undo 吃掉它撤销的那条，自己不留 | history.pop()，之后不 append |
+| 编号不回退 | rid 仍是 len(rects) + 1，撤销 add 不从 rects 删元素 |

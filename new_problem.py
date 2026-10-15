@@ -46,12 +46,9 @@ def main():
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     (pdir / "problem.md").write_text(
-        "# 题面\n\n## 原题要点\n\n> （原题英文原样放这里）\n\n```\n（接口签名）\n```\n\n"
-        "## 这题要你写的东西是什么\n\n（用一个现实例子说这东西是干嘛的）\n\n"
-        "## 每个方法分别是什么意思\n\n- \n\n"
-        "## 题目分几问\n\n1. \n\n"
-        "## 题面故意没说清楚的地方\n\n- \n\n"
-        "## 面试形式\n\n", encoding="utf-8")
+        "# 题面\n\n"
+        "## 题目\n\n- （一句话：要写什么东西）\n- （方法名(参数)：干什么）\n- 第一问：\n\n"
+        "## 要问清楚的地方\n\n- \n", encoding="utf-8")
 
     (pdir / "overview.md").write_text(
         "# 整体思路\n\n**一句话。** \n\n**各问是叠加关系。** \n\n"
@@ -64,10 +61,10 @@ def main():
         sdir = pdir / "steps" / f"{i:02d}-{name}"
         sdir.mkdir(parents=True)
         (sdir / "notes.md").write_text(
-            f"# 第{cn(i)}问：（标题）\n\n## 面试官给的骨架\n\n```python\n```\n\n"
-            "## 思路\n\n**开口先定的口径。**\n\n1. \n\n**（字段 / 状态 / 每条转移）**\n\n"
-            "**（用带数字的例子走一遍）**\n\n**复杂度。** \n\n"
-            "## 常见疑问\n\n### \n\n", encoding="utf-8")
+            f"# 第{cn(i)}问：（标题）\n\n## 这一问要做什么\n\n- \n\n## 核心思路\n\n- \n\n"
+            "## 思考与反问\n\n- \n\n"
+            "## 测试要点\n\n- test_xxx：\n\n"
+            "## 更多说明\n\n### \n\n", encoding="utf-8")
         (sdir / "solution.py").write_text("# 做到这一步的完整代码\n", encoding="utf-8")
         (sdir / "tests.py").write_text(
             "from solution import *\n\n\n"

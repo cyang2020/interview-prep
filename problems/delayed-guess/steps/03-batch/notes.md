@@ -1,91 +1,54 @@
 # 第三问：多局并行，批次最少
 
-## 面试官给的骨架
+## 这一问要做什么
 
-按签名还原（原题是 Java 的 `String[] checkBatch(int[] guesses)`）：
+- 写 find_numbers(upper_bounds, server)：多局同时猜，每局各有一个上界和一个答案，按局的顺序返回全部答案。
+- 服务器换成 server.check_batch(guesses)：每一批要给每个没定的局交一个新数，定了的局填 -1；返回每局上一批那个数的结果，上一批是 -1 就返回 PENDING。
+- 要求调 check_batch 的批次最少。最多 1000 局，每局上界最大 1e9。
 
-```python
-class BatchGuessServer:
-    def check_batch(self, guesses: list[int]) -> list[str]:
-        """guesses 长度 = 局数；已完成的局填 -1。
-        返回的第 i 位说的是上一批第 i 局交的数；上一批该位是 -1 或没有上一批，回 "PENDING"。"""
+## 核心思路
 
+- 接口换成 find_numbers(upper_bounds, server)：server.check_batch(guesses) 一次收一个列表、每局一个数，返回每局上一批那个数的结果。已定的局交 -1，之后不能再交数。目标是 check_batch 的调用次数最少。
+- 第二问的 find_number 自己在循环里调 server，多局没法一起交，所以把它翻成 _Game 状态机：propose() 算这一批交什么，absorb(resp) 收上一批那个数的结果。放数规则和 find_number 一字不差。
+- 字段：lo、hi、k、pending 同第二问；新增 sent 是本批刚交的数，answer 不是 None 就表示这局定了。upper_bound = 1 的局构造时 answer 直接是 1。
+- propose：answer 已定返回 -1；否则按 pending 是否为 None 走第二问的两条放数规则，结果记到 sent。
+- absorb：answer 已定直接跳过，收到什么都不看；否则按 resp 更新 pending 对应的 answer、hi 或 lo，再把 sent 转正成 pending、k 减 1；lo == hi 就 answer = lo，pending 出了区间就置 None。
+- find_numbers：按 max(upper_bounds) 建一张 A 表所有局共用；循环到所有 answer 都不是 None，每轮先每局 propose、一次 check_batch、再每局 absorb。全定了就退出，最后一批的结果不去取。
+- 复杂度：批次 = 各局 _min_calls 的最大值，1000 局最大 1e9 是 43 批；每批 O(局数)，空间每局几个整数加一张 44 项的表。
 
-def find_numbers(upper_bounds: list[int], server: BatchGuessServer) -> list[int]:
-    ...
-```
+## 思考与反问
 
-## 思路
+- -1 的口径：某局交了 -1，这一格从下一批起返回 PENDING，再交数算违规。按此做：propose 对 answer 已定的局永远返回 -1，absorb 对它直接 return。
+- "这局完成"按我自己推断出来算，不等服务器回 CORRECT：题面例 1 的局 1 收到 2 的 TOO_HIGH 就填 -1。代码里 absorb 看到 lo == hi 就定 answer，upper_bound = 1 构造时就定，全部局都是 1 时 check_batch 一次都不调。
+- 为什么不逐局调 find_number：它一局跑完才轮到下一局，批次是各局 k 之和，1000 局 1e9 要 43000 批；拆成 propose、absorb 让所有局同一批交，43 批。
+- 为什么要 sent 和 pending 两个字段：absorb 要先用 resp 更新上一批那个数 pending 对应的 lo、hi，然后才知道本批那个数 sent 还在不在新区间里。upper_bound = 50 的局第 2 批交 26、收到的是 42 的 TOO_HIGH，若 propose 时就把 26 写进 pending，hi 会错收成 25 而不是 41。
+- 批次能不能比最慢那局更少？不能，局之间不共享任何信息，最慢那局单独也要 k 次，第二问的博弈树已经证明 k 是下界。
+- 追问：题面说非 -1 的值都算一次猜测，猜测总数是不是也最少？是。一局的猜测数等于它未完成的批次数，就是它自己的 k，第二问已压到最少；CORRECT 回来那批刚交的 sent 是白扔的一个，和单局最后一次调用一样，下一批起 propose 返回 -1。
 
-**开口先定的口径。**
+## 测试要点
 
-1. 成本按 check_batch 的次数算。这决定了我们优化的是批次，不是猜测总数（下面会讲这两件事其实一致）。
-2. "这局完成"指我们自己已经推断出来，不需要服务器回 CORRECT。题面例 1 就是这么做的。这决定了 answer 一定下来就填 -1。
-3. upper_bound = 1 的局从第一批起填 -1；所有局都是 1 时一次都不调。这决定了 _Game 初始化时就能把 answer 定好，外层循环条件是"还有局没定"。
+- test_batch_examples_from_problem：[4, 3]、[10, 50, 8]、[20, 20, 20, 20] 三个例子答案全对，批次恰好等于最慢那局的 _min_calls。
+- test_batch_count_never_exceeds_slowest_game：几十种局数和上界组合，含 [1, 1e9]、1 到 40 连号、全部 secret 取上界，答案全对、裁判没报违规、批次不超最慢那局。
+- test_batch_all_upper_bound_one_makes_no_call：[1, 1, 1] 一批都不调，返回 [1, 1, 1]。
+- test_batch_declared_game_keeps_sending_minus_one：局 1 用 -1 宣告过，之后再没交过数，它交过的数比批次数少。
+- test_batch_max_scale：1000 局、最大上界 1e9，正好 43 批。
+- test_single_every_secret_small_range_hits_bound：第二问的单局测试改名保留，1 到 300 每个 secret 最坏次数仍正好等于 _min_calls。
+- test_single_large_upper_bounds：第二问的单局测试改名保留，1e9 和 2^30 不超预算，确认 find_number 没被改坏。
 
-**批次数由什么决定。** 规则说每一批必须给所有未完成的局各交一个新数，不能跳过。所以每一局的推进节奏和单局一模一样：第 t 批交一个数、第 t+1 批拿到它的结果。而局与局之间没有信息往来：局 i 的结果只说局 i，猜测范围也各管各的。结论：每一局独立跑第二问的策略，批次数等于最慢那一局的次数，也就是所有局 _min_calls 的最大值。这同时是下界：upper_bound 最大的那一局单独拿出来就需要那么多次，再多的局也救不了它。所以没有跨局的优化空间。
+## 更多说明
 
-**猜测总数顺带也最少。** 题面提醒"每个非 -1 的值都算一次猜测"。一局的猜测总数等于它处于未完成状态的批次数，就是它自己的调用次数，第二问已经压到最少。所以"批次最少"和"猜测总数最少"是同一件事，不用二选一。
+### [4, 3]，secret [3, 1] 走一遍（3 批）
 
-**工程上要改什么。** 第二问是一个循环，check 在循环体中间。批量版做不到：必须所有局先各自算出这批交什么、合成一个数组一起调用、再各自收结果。所以把循环拆成两个动作：
+A = [1, 1, 3, 5]。局 0 上界 4，k = 3；局 1 上界 3，k = 2。
 
-| 动作 | 做什么 | 对应第二问的哪段 |
-|---|---|---|
-| propose() | 按当前区间、pending、预算算出这批交什么；已定返回 -1 | 循环体里挑 guess 的那段 |
-| absorb(resp) | 收 pending 的结果，收缩区间，判断是否已定；把 sent 转正成新的 pending | 循环体里收结果的那段 |
-
-每一批的顺序固定：所有局 propose，一次 check_batch，所有局 absorb。
-
-**多出来的两个字段。** sent 是本批刚交的数。为什么不直接写进 pending：absorb 收的是上一批那个数的结果，收的时候要拿旧的 pending 去比较，本批交的数要等收完才能转正。不分开的话，absorb 会拿本批刚交的数去匹配上一批的结果，区间收缩就错了。answer 是这局定下来的答案，一旦不是 None，propose 永远返回 -1，absorb 直接跳过。
-
-**-1 的记账。** 外层循环条件是"还有局没定"，全定就退出，最后一批的结果不去取。已定的局在后面的批次里收到的 CORRECT 或 PENDING 都不用看。去重按局各自成立，理由和单局一样，不需要额外结构。
-
-**用题面例 2 走一遍。** upper_bounds = [10, 50, 8]，secrets = [6, 17, 4]。三局各自需要的最坏次数是 5、8、4，所以批次上限 8。程序实际跑出来：
-
-| 第几批 | 交 | 返回（说的是上一批） | 发生了什么 |
+| 批 | propose 交的 | check_batch 返回，说的是上一批 | absorb 后 |
 |---|---|---|---|
-| 1 | [10, 42, 6] | [PENDING, PENDING, PENDING] | 三局各自摆第一个数 |
-| 2 | [6, 26, 4] | [TOO_HIGH, TOO_HIGH, TOO_HIGH] | 三局都在收缩 |
-| 3 | [4, 16, 2] | [CORRECT, TOO_HIGH, CORRECT] | 局 0 定为 6、局 2 定为 4；这批它们已经被迫交了 4 和 2 |
-| 4 | [-1, 10, -1] | [TOO_LOW, TOO_LOW, TOO_LOW] | 局 0、局 2 开始填 -1，它们这批收到的结果不看 |
-| 5 | [-1, 22, -1] | [PENDING, TOO_LOW, PENDING] | 上一批填了 -1 的位置，返回变成 PENDING |
-| 6 | [-1, 20, -1] | [PENDING, TOO_HIGH, PENDING] | 只有局 1 在走 |
-| 7 | [-1, 18, -1] | [PENDING, TOO_HIGH, PENDING] | |
-| 8 | [-1, 17, -1] | [PENDING, TOO_HIGH, PENDING] | 18 偏大，局 1 的区间只剩 17，定了，退出 |
+| 1 | [4, 2] | [PENDING, PENDING] | 局 0 pending = 4，k = 2；局 1 pending = 2，k = 1 |
+| 2 | [2, 1] | [TOO_HIGH, TOO_HIGH] | 局 0 hi = 3，pending = 2，k = 1；局 1 hi = 1，lo == hi，answer = 1 |
+| 3 | [1, -1] | [TOO_LOW, CORRECT] | 局 0 lo = 3，lo == hi，answer = 3；局 1 已定，跳过 |
 
-8 批，等于最慢那局。第 3 批里局 0 和局 2 交的 4 和 2 就是题面那句"即使结果已经够了，这批交的也算猜测"说的事：被规则逼出来的，但不多花批次。
+第 3 批局 1 交的是 -1，服务器照样返回它上一批那个数 1 的结果 CORRECT，absorb 不看。两局都定了循环退出，第 3 批局 0 交的 1 的结果不去取。批次 3 = max(3, 2)。题面例 1 给的序列是 [2, 2]、[3, 1]、[4, -1]，交的数不同，也是 3 批。
 
-**复杂度。** 每批走一遍所有局，O(局数)；批次最多 43；1000 局总共不到 5 万步；空间每局常数个字段。
+### 已定的局之后每批会收到什么
 
-## 常见疑问
-
-### 为什么批次数就是最慢那一局，快的局真的帮不上忙吗
-
-把两局放一起看：局 0 upper_bound = 4，局 1 upper_bound = 3。局 0 单独要 3 次，局 1 单独要 2 次。
-
-| 第几批 | 局 0 | 局 1 |
-|---|---|---|
-| 1 | 交 4 | 交 2 |
-| 2 | 交 2，收到 4 偏大 | 交 1，收到 2 偏大，只剩 1，定了 |
-| 3 | 交 1，收到 2 偏小，只剩 3，定了 | 交 -1 |
-
-局 1 第 2 批就定了，但它定了对局 0 没有任何影响：局 0 的区间、pending、预算都只由局 0 自己的结果决定。局 1 唯一能做的是交 -1，而批次本来就不按谁交了多少数算。所以 3 批是局 0 一个人决定的。
-
-### propose 和 absorb 的顺序为什么不能换
-
-因为一次 check_batch 同时做两件事：交本批的数、收上一批的结果。用局 1（upper_bound = 50，secret = 17，预算 8）的前三批看每个字段：
-
-| 时刻 | lo..hi | pending | sent | 做的事 |
-|---|---|---|---|---|
-| 第 1 批 propose | 1..50 | 无 | 42 | 情况一，交 1 + min(49, A[7]=41) = 42 |
-| 第 1 批 absorb | 1..50 | 42 | 无 | 收到 PENDING，没东西可收；42 转正 |
-| 第 2 批 propose | 1..50 | 42 | 26 | 情况二，下方 41 个，交 1 + min(40, A[6]=25) = 26 |
-| 第 2 批 absorb | 1..41 | 26 | 无 | 收到 42 偏大，hi = 41；26 在区间里，转正 |
-| 第 3 批 propose | 1..41 | 26 | 16 | 情况二，交 1 + min(24, A[5]=15) = 16 |
-| 第 3 批 absorb | 1..25 | 16 | 无 | 收到 26 偏大，hi = 25；16 转正 |
-
-如果 propose 时就把 sent 写进 pending，第 2 批 absorb 收到的"42 偏大"会被拿去和 26 比，区间会错收成 1..25。
-
-### -1 之后收到的 PENDING 和 CORRECT 要不要处理
-
-不要。absorb 第一行就是 answer 不为 None 直接 return。例 1 第 3 批局 1 收到 CORRECT，是对第 2 批交的 1 的确认，我们在第 2 批 absorb 时已经从"2 偏大"推出答案是 1 了。第 4 批起收到的 PENDING 是因为第 3 批交的是 -1，服务器手里没有在等结果的数。两种都不改变任何字段。
+[10, 50, 8]，secret [6, 17, 4] 的例子里，局 0 第 3 批收到 CORRECT 定了，第 4 批交 -1 却收到 TOO_LOW：那是它第 3 批交的数 4 的结果，白扔的那一个。第 5 批起服务器对 -1 的格子返回 PENDING。absorb 开头判 answer 已定就 return，所以这三种返回值都不用区分。

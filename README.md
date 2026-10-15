@@ -16,7 +16,7 @@ open site/index.html    # 直接双击打开即可，不需要起服务
 ```
 problems/<题目id>/
   meta.json          标题、公司、标签、阶段
-  problem.md         题面（原题要点 + 大白话讲解）
+  problem.md         题面（大白话讲清这题在问什么）
   overview.md        整体思路（状态表、数据结构、面试节奏、追问）
   steps/<序号-名字>/
     notes.md         这一问的思路。第一行 "# 第N问：标题" 会变成页签

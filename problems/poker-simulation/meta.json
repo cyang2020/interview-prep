@@ -1,0 +1,10 @@
+{
+  "title": "Poker Simulation",
+  "title_zh": "三张牌扑克模拟",
+  "company": "OpenAI",
+  "stage": "phone-screen",
+  "frequency": "Medium · New",
+  "last_asked": "2026-09-28",
+  "tags": ["simulation", "game-engine", "OOD", "logging"],
+  "language": "python"
+}

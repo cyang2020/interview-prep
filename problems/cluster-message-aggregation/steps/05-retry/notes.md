@@ -1,77 +1,67 @@
 # 第五问：消息会丢、机器会挂，超时重发和去重
 
-## 面试官给的骨架
+## 这一问要做什么
 
-接口上多一样东西：节点要有一个本地定时器。面试里说"假设有 set_timer(delay, key)，到点回调我的 on_timer(key)"，面试官一般认可。我的模拟 Cluster 提供 set_timer，并且可以按概率丢掉节点之间的消息。
+- 节点之间的消息会丢，某台机器可能挂掉。丢了的消息要重发，根最后仍要打印对；重发造成的重复消息不能让结果算两遍。
+- 某个孩子怎么发都没回音时不能一直等，要在根打印一条失败信息，说明哪个节点联系不上。
+- 多一个假设：节点有本地定时器 set_timer(node_id, delay, key)，到点回调 on_timer(key)，on_timer 要你写。
 
-```python
-class Cluster:
-    def set_timer(self, node_id, delay, key): ...   # delay 之后调 nodes[node_id].on_timer(key)
+## 核心思路
 
-class Node:
-    def on_timer(self, key): ...                     # 新增，要你写
-```
+- 接口多一样：节点要有本地定时器。Cluster 提供 set_timer(node_id, delay, key)，到点回调节点的 on_timer(key)，key 就是请求编号。面试里说"假设有这个定时器"，面试官一般认可。
+- 消息种类加两种：ERR 往上报失败，内容是联系不上的节点 id；ACK 是孩子对重复请求的回答"我还在算"，内容为空。
+- 节点多四个字段：timeout（等多久没收齐就重发，None 表示不设）、max_attempts（最多发几轮）、done（OrderedDict，请求编号到最终发给父亲的那条消息）、done_cache（done 最多留几条）。Pending 多 attempts：{孩子 id: 已发几轮}，第一轮算 1。
+- 收到 REQ 分三种：req_id 在 done 里，把 done[req_id] 原样再发给父亲，不重新往下问；在 pending 里，回一条 ACK；都不在，走 _start。
+- 收到 RES：pending 里没有就丢弃；有就 replies[from_id] = payload，同一个孩子回两次后一次覆盖前一次，条目数不变。收到 ACK：attempts[from_id] = 1。收到 ERR：req_id 在 pending 里就调 _fail(req_id, payload)。
+- on_timer(req_id)：pending 里没有就返回；逐个看没回的孩子，attempts[child] 已到 max_attempts 就 _fail(req_id, child) 并返回，否则 attempts 加 1、只给它重发 REQ；最后再 set_timer 一次。
+- 成功和失败都走 _complete(req_id, final_message, printed)：成功的 final_message 是 RES，失败的是 ERR；del pending，done[req_id] = final_message，超过 done_cache 丢最老的，根打印 printed，不是根发 final_message 给父亲。根打印的失败信息长这样："count failed: no reply from 6"。
+- 复杂度：不丢包时和第四问一样，只多定时器；每丢一条消息多一轮 timeout 等待加一条重发。
 
-## 思路
+## 思考与反问
 
-**开口先定的口径。**
+- 丢消息后做什么？重发，只发给还没回的孩子；某个孩子连续 max_attempts 轮没回音就当它挂了，整个请求报 ERR，根打印哪个节点联系不上。另一种口径是打印部分结果，我没选：topology 的部分结果格式说不清，count 打出 5 客户端也不知道少了谁。要部分结果改 _fail，把 missing 当成结果为 "?" 的孩子走 _finish_if_ready。
+- "没回音"和"慢"必须分开，靠 ACK。6 挂了，根和 3 用同样的 timeout 和 max_attempts，根早 2 个单位开始计时：没有 ACK 的话根在 400 先放弃报 "no reply from 3"，而 3 要到 402 才试完；有 ACK，根每次重发 3 都回"还在算"，attempts[3] 归 1，根不会先于 3 放弃。
+- 重试次数为什么按孩子分别记：3 有 5 和 6 两个孩子，5 早回了、6 一直没回音，次数要落在 6 头上；整个请求记一个数，5 的 ACK 会把 6 的账也清掉，6 永远判不了挂。
+- 父亲重问时孩子为什么回 done 里存的，不重新算：重新算要再问整棵子树，一次丢包的代价变成整棵子树重做；而且树在变时第二次算的结果可能不一样，父亲拿到的是哪一次说不清。
+- done 为什么要有上限：不设，每个请求在每个节点永远留一条。超出上限后父亲重问会被当成新请求重新算，结果仍对只是慢，所以上限定成"父亲最晚可能重问的时间内经过的请求数"够用。
+- 追问"timeout 定多短会出错"：不会出错。30 层的链、timeout 20，根的定时器到期十几次，每次收到 ACK，最后照样打印 30；代价是每隔 timeout 多一对 REQ 和 ACK，所以 timeout 还是按子树最深路径往返时间乘余量定。
 
-1. 丢消息的后果是什么：父亲等某个孩子的回复永远等不到，根永远不打印。所以必须有超时。
-2. 超时之后做什么：重发请求，只发给还没回的孩子。重发 max_attempts 轮还不行，当这个孩子联系不上，这个请求失败，往上报 ERR，根打印一条失败信息，说明哪个节点联系不上。另一种口径是打印部分结果，比如 count 只算联系得上的部分，我没选，因为 topology 的部分结果格式说不清。
-3. 重发带来重复：孩子可能收到同一个请求两次，父亲可能收到同一个回复两次。两边都要去重，靠第四问的请求编号。
-4. 超时值怎么定：要比子树最深路径的一次往返时间长，不然没丢也会误判重发。误判的重发不会算错，但会消耗 max_attempts，次数用完会误报失败。
+## 测试要点
 
-**节点多三个字段。** timeout 和 max_attempts 两个参数。done：一个有大小上限的有序字典，请求编号到"最终发给父亲的那条消息"。Pending 里多一个 attempts，已经发了几轮请求。
+- test_lost_request_is_resent：3 发给 6 的第一条 REQ 丢了，3 超时后只给 6 重发，最后打印 7。
+- test_lost_reply_is_answered_from_done_cache_not_recounted：6 回给 3 的第一条 RES 丢了，3 重问，6 从 done 原样重发不再问 7，打印 7 不是 8。
+- test_duplicate_reply_before_finish_counts_once：2 的回复到两次只算一次；做完后迟到的回复丢弃，不会第二次打印。
+- test_random_loss_still_correct：两成丢包、10 个随机种子，count 和 topology 都算对，pending 清空。
+- test_unreachable_node_reports_error_at_root：发给 6 的消息全丢，根只打印一次 "count failed: no reply from 6"，失败也清状态。
+- test_retry_rounds_are_bounded：max_attempts=3，3 总共只给 6 发 3 条 REQ。
+- test_done_cache_is_bounded：done_cache=2，跑 5 次后每个节点 done 不超过 2 条。
+- test_slow_subtree_acks_instead_of_failing：30 层链、timeout=20、max_attempts=2，没丢包，收到超过 10 条 ACK，打印 30 没有误报。
+- test_parent_does_not_give_up_before_child_finishes_retrying：6 挂了，根报的是 6 不是 3。
+- test_chain_counts_depth：第一问沿用，改成 timeout=None，50 层链只验证结果，不跑定时器。
 
-**收到 REQ 分三种情况。** 编号在 done 里：父亲没收到我上次的回复，把存好的那条消息原样再发，不重新往下问。编号在 pending 里：正在算，我自己的定时器会管我的孩子，父亲多问一遍不理。都不在：新请求，走 _start。
+## 更多说明
 
-**收到 RES。** pending 里没有这个编号就丢弃，这是迟到或重复的回复。有就 replies[from_id] = 结果，同一个孩子回两次，后一次覆盖前一次，字典条目数不变，所以不会算两遍。这就是第三问把计数器改成字典的回报。
-
-**收到 ERR。** pending 里有这个编号就调 _fail，把联系不上的节点 id 原样往上传。没有就丢弃。
-
-**on_timer(编号)。** pending 里没有就返回，定时器是旧的。attempts 已经到 max_attempts 就找出第一个没回的孩子，调 _fail。否则 attempts 加 1，只给没回的孩子重发 REQ，再设一次定时器。
-
-**_complete 收口。** 成功和失败都走它：删 pending，把最终消息存进 done，done 超过上限就丢最老的，根打印，不是根就把最终消息发给父亲。成功的最终消息是 RES，失败的是 ERR，父亲重问时两种都原样重发。
-
-**用"6 回给 3 的回复丢了"走一遍。** timeout 100，max_attempts 4，时刻是模拟时钟，投递一条消息算 1。
+### 6 回给 3 的回复丢了（timeout 100，max_attempts 4，每条消息传 2 个单位）
 
 | 时刻 | 谁 | 发生什么 |
 |---|---|---|
-| 0 | 1 | 收到 count，编号 1-1，给 2、3 发 REQ，设定时器 100 |
-| 2 | 3 | 收到 REQ，给 5、6 发 REQ，设定时器 102 |
-| 5 | 5 | 回 3，3 记下 5 的结果 |
-| 9 | 6 | 收齐 7 的回复，算出 2，存 done[1-1] = RES:count:1-1:2，发给 3，这条丢了 |
-| 102 | 3 | 定时器到，没收齐，attempts 变 2，只给 6 重发 REQ，再设定时器 202 |
-| 103 | 6 | 收到 REQ，编号在 done 里，原样重发 RES:count:1-1:2，不再问 7 |
-| 104 | 3 | 收到 6 的回复，收齐，算出 4 发给 1 |
-| 105 | 1 | 收齐，打印 7 |
-| 202 | 3 | 定时器到，pending 里没有 1-1，返回 |
+| 0 | 1 | 收到 count，编号 1-1，给 2、3 发 REQ，定时器定在 100 |
+| 2 | 3 | 收到 REQ，给 5、6 发 REQ，定时器定在 102 |
+| 8 | 6 | 收齐 7 的回复，算出 2，存 done[1-1] = RES:count:1-1:2，发给 3，这条丢了 |
+| 100 | 1 | 定时器到，3 没回，attempts[3] 变 2，给 3 重发 REQ |
+| 102 | 3 | 收到 1 的重复 REQ，1-1 在 pending 里，回 ACK；自己定时器到，6 没回，attempts[6] 变 2，只给 6 重发 REQ |
+| 104 | 1 | 收到 3 的 ACK，attempts[3] 归 1 |
+| 104 | 6 | 收到重复 REQ，1-1 在 done 里，原样重发 RES:count:1-1:2，不再问 7 |
+| 106 | 3 | 收到 6 的回复，收齐，算出 4 发给 1 |
+| 108 | 1 | 收齐，打印 7 |
 
-如果第 9 行丢的是 3 发给 6 的 REQ，第 102 行重发后 6 从头算一次，结果一样。如果 6 这台机器挂了，第 102、202、302 行各重发一次，第 402 行 attempts 已经是 4，3 调 _fail，发 ERR:count:1-1:6 给 1，1 打印 "count failed: no reply from 6"。
+### 6 这台机器挂了
 
-**为什么父亲重问时孩子要回存好的结果，而不是重新算。** 重新算要再问一遍整棵子树，子树里每个节点又要等自己的孩子，一次丢包的代价变成整棵子树重做。更重要的是第二次算出来的结果和第一次可能不一样，比如树在变，父亲拿到的是哪一次的就说不清了。存好的消息原样重发，结果唯一。
+3 在 102、202、302 各给 6 重发一次，402 时 attempts[6] 已经是 4，3 调 _fail，发 ERR:count:1-1:6 给 1，1 打印 "count failed: no reply from 6"。期间根在 100、200、300、400 各给 3 重发一次，3 每次回 ACK，根的 attempts[3] 一直归 1，所以根报的是 6 不是 3。如果 8 那一行丢的是 3 发给 6 的 REQ，102 重发后 6 从头算一次，结果一样。
 
-**done 为什么要有上限。** 不设上限，每个请求在每个节点上永远留一条。上限之内的旧请求父亲还能重问，超出的父亲重问就会被当成新请求重新算，结果仍然正确，只是慢。所以上限定成"父亲最晚可能重问的时间内会经过的请求数"就够。
+### timeout 和子树往返时间的关系
 
-**复杂度。** 不丢包时和第四问一样，只多了定时器。每丢一条消息，多一轮超时等待加一条重发。
-
-## 常见疑问
-
-### 超时值太短会怎样
-
-**误判是什么。** 消息没丢，只是子树大或者负载高，回复慢，父亲的定时器先到了。父亲重发 REQ，孩子正在算，编号在 pending 里，就不理；孩子已经算完，编号在 done 里，就重发结果。两种情况结果都不会错。
-
-**代价在哪。** 每次误判 attempts 加 1，到 max_attempts 就报失败，而孩子其实只是慢。我的模拟里投递一条消息算 1 个单位时间，20 个请求同时跑，一共 260 多条消息，timeout 100 就会误判。测试 test_timeout_too_short_under_load 记录了这个现象：根打印出若干条 failed。同一组请求把 timeout 改成 1000 就全对，测试 test_many_mixed_requests_at_once 就是这么设的。
-
-| timeout | 20 个请求同时跑 | 结果 |
-|---|---|---|
-| 100 | 总耗时 260 单位，每个节点误判两三次，attempts 用完 | 部分请求误报失败 |
-| 1000 | 误判 0 次 | 全对 |
-
-**面试里怎么说。** 超时值按"子树最深路径的往返时间乘一个余量"定，或者让 timeout 随树深变化。更稳的做法是孩子收到重复 REQ 时回一条"还在算"，父亲收到就把定时器往后推、不消耗 attempts；这样 attempts 只在完全没有回音时消耗。这是改进方向，面试不要求写。
-
-### 为什么失败要整个请求报错，而不是跳过那个节点
-
-**两种选择。** 一是报错：根打印 "count failed: no reply from 6"。二是部分结果：count 只算联系得上的，topology 把 6 那一支写成问号。
-
-**我选报错的理由。** 题面要求根打印"总数"和"拓扑"，部分结果既不是总数也不是拓扑，客户端拿到 5 并不知道少了谁。报错把"哪个节点联系不上"直接告诉运维，比一个看起来正常其实少了两台的数字有用。如果面试官要部分结果，改动在 _fail：不发 ERR，而是把 missing 当成一个结果为 "?" 的孩子继续走 _finish_if_ready。
+| timeout 和子树往返时间 | 后果 |
+|---|---|
+| timeout 大于往返时间 | 不丢包时定时器到期前已收齐，零额外消息 |
+| timeout 小于往返时间 | 结果仍然正确，但每隔 timeout 多一对 REQ 和 ACK |

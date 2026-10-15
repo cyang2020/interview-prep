@@ -1,0 +1,10 @@
+{
+  "title": "Persistent KV Store with Binary Medium",
+  "title_zh": "可持久化 KV 存储：自定义二进制格式与分文件落盘",
+  "company": "OpenAI",
+  "stage": "screening (coding)",
+  "frequency": "prep 站未标频率",
+  "last_asked": "",
+  "tags": ["serialization", "binary-format", "persistence", "api-design", "chunking"],
+  "language": "python"
+}

@@ -1,88 +1,59 @@
 # 第4问：批量移除
 
-## 面试官给的骨架
+## 这一问要做什么
 
-```
-int batchRemove(int x, int y)
-```
+- 加 batchRemove(x, y)：把盖住这格的所有矩形整张撕掉，包括被压在下面看不见的，返回撕掉的张数；一张没有返回 0。
+- 整批在 undo 历史里只算一条，一次 undo 全部放回；返回 0 的那次不算。
 
-其余方法完全不变，`undo` 也不用改。
+## 核心思路
 
-## 思路
+- 接口加一个 batchRemove(x, y)，返回撕掉的张数，一张没撕到返回 0。其余方法包括 undo 一行没改。
+- batchRemove：顺着 rects 扫一遍，收集 active 且 covers(x, y) 的 rid 到 hit；hit 为空返回 0 不记历史；否则把 hit 里每张的 active 翻成 False，history 压一条 ("remove", hit)，返回 len(hit)。
+- 不能用 getAt 选中：getAt 只给最上面一张，被压在下面看不见的也要撕。
+- 不能复用 removeRectangle：它每张写一条历史，撕 3 张要 3 次 undo 才放回来，题目要一次 undo 整批放回。
+- undo 不用改：第二问就把编号写成列表，for rid in ids 直接把整批的 active 改回 True，每张回到自己编号对应的那一层。
+- hit 的顺序无所谓（代码里是编号从小到大）：放回来后谁压谁由编号决定，不看列表顺序。
+- 复杂度：扫一遍 O(n)，翻标记 O(命中数)；undo 这一批 O(命中数)。
 
-### 开口先定的口径
+## 思考与反问
 
-- 撕掉哪些？盖住这格的**全部**活跃矩形，包括被压在下面看不见的。每一张都是整张撕掉，不是只撕这格。
-- 返回什么？撕掉的数量。已经不活跃的不算在内。
-- 历史怎么记？**整批算一条**。题目原话：A single undo() restores all rectangles removed by that call。
-- 一张都没撕到呢？返回 0，不记历史。
+- 撕哪些？按盖住这格的全部活跃矩形，包括看不见的，每张整张撕。这决定了用 r.active and r.covers(x, y) 全扫，不用 getAt。
+- 返回数量算不算已经撕掉的？按不算，筛选条件里带 active。两张铺满先 removeRectangle(1) 再 batchRemove(1,1)：返回 1，历史是 remove[2]；第一次 undo 只放回 2，第二次 undo 才放回 1。
+- 历史怎么记？按整批一条。复用 removeRectangle 撕三张铺满后历史是 remove[1], remove[2], remove[3]，一次 undo 后 getAt(1,1) 看着也是 3，但 removeRectangle(1) 返回 False，正确状态应返回 True。
+- 一张都没撕到呢？按返回 0 不记历史。记了的话紧接着的 undo 空跑一次，两张矩形一张也放不回来。
+- 追问：四问加完哪些老代码被改过？只有 __init__ 多了 history，addRectangle 和 removeRectangle 各多一行写历史，其余全是新增方法。第一问定下的"存矩形不存格子、编号即层次"没被推翻。
 
-第三条口径决定了这一问**不能**复用 `removeRectangle`：那样每张会各写一条历史，之后要按 n 次 `undo` 才能全放回来，和题目要求的一次 `undo` 不符。
+## 测试要点
 
-### 三步
+- test_batch_remove_official_example：(2,1) 上 1、2 都盖住但只看得见 2，batchRemove 返回 2；再调返回 0；一次 undo 两张都回来，2 仍在上面。
+- test_batch_remove_takes_hidden_ones：1、2 铺满、3 只在 (0,0)，batchRemove(1,1) 返回 2，3 不动。
+- test_batch_remove_removes_whole_rectangles：横条竖条在 (0,0) 相交，batchRemove(0,0) 后两条远端的格子都清掉。
+- test_batch_remove_miss_writes_no_history：点空格子返回 0，第一次 undo 撤销的是 add。
+- test_batch_remove_skips_already_removed：先 removeRectangle(1) 再 batchRemove 返回 1，两次 undo 各管各的记录，1 回来后压在 2 下面。
+- test_batch_undo_keeps_order_inside_batch：三张整批撕掉再 undo，getAt 是 3，之后 removeAt 依次拿到 3、2。
+- test_mixed_operations_undo_chain：add 两张后 removeAt 撕 2、batchRemove 撕 1，四次 undo 倒序撤回每一条，第五次返回 False。
 
-| 步骤 | 做什么 | 为什么 |
-|---|---|---|
-| 1 | 扫一遍 `rects`，收集 `active` 且 `covers(x,y)` 的编号 | 下面压着的也要，所以不能用 getAt |
-| 2 | 空列表就返回 0 | 不记历史 |
-| 3 | 全部翻成不活跃，往历史压**一条** `("remove", 这批编号)` | 一次调用一条记录 |
-
-收集的顺序无所谓（代码里是编号从小到大，因为顺着列表扫）。因为放回来以后谁压谁完全由编号决定，不依赖这个列表的顺序。
-
-### `undo` 为什么一行都不用改
-
-第二问写历史时就把编号那一项写成了列表。现在 `remove` 这条记录里装的是 n 个编号，`undo` 原来那个 `for rid in ids` 的循环直接把整批复活，而且每张都回到自己的编号对应的那一层。
-
-| 记录 | 来自哪 | undo 做什么 |
-|---|---|---|
-| ("add", [5]) | addRectangle | 5 改成不活跃 |
-| ("remove", [5]) | removeRectangle / removeAt | 5 改成活跃 |
-| ("remove", [1,2,7]) | batchRemove | 1、2、7 都改成活跃 |
-
-三种记录在 `undo` 里走的是同一条代码路径。
+## 更多说明
 
 ### 走一遍题目的例子
 
-4 列 3 行，矩形 1 占 `(1,0)-(2,1)`，矩形 2 占 `(2,1)-(3,2)`，两张都盖住 `(2,1)`，但只看得见 2。
+4 列 3 行，矩形 1 占 (1,0)-(2,1)，矩形 2 占 (2,1)-(3,2)，两张都盖住 (2,1) 但只看得见 2。
 
-| 调用 | 命中的编号 | 历史栈 | 返回 |
+| 调用 | hit | history | 返回 |
 |---|---|---|---|
 | batchRemove(2,1) | [1, 2] | add[1], add[2], remove[1,2] | 2 |
 | getAt(2,1) | — | 不变 | -1 |
-| batchRemove(2,1) | [] | **不变** | 0 |
-| undo | — | add[1], add[2] | true |
+| batchRemove(2,1) | [] | 不变 | 0 |
+| undo | — | add[1], add[2] | True |
 | getAt(2,1) | — | 不变 | 2 |
 | getAt(1,0) | — | 不变 | 1 |
 
-第三行是判定细节：返回 0 的那次调用绝不能留记录，否则紧接着的 `undo` 会空跑一次，两张矩形一张也放不回来。
+第五行一次 undo 放回两张，(2,1) 上面是 2 而不是 1，代码里没有任何一处记过"2 原来在 1 上面"。
 
-第五行再次体现主线：一次 `undo` 放回两张，`(2,1)` 上面是 2 而不是 1，因为 2 的编号更大——代码里没有任何一处记录过"2 原来在 1 上面"。
+### 三种记录在 undo 里走同一条路
 
-### 复杂度
-
-`batchRemove` 扫一遍所有矩形，O(n)；翻标记 O(命中数)。`undo` 这一批是 O(命中数)。
-
-## 常见疑问
-
-### 返回的数量要不要算上已经撕掉的
-
-不算。筛选条件里有 `active`，只统计这次真正从板上拿下来的。
-
-两张铺满整板的矩形，先 `removeRectangle(1)`，再 `batchRemove(1,1)`：返回 1 而不是 2，历史里那条记录是 `remove[2]`。之后第一次 `undo` 只放回 2，第二次 `undo` 才把 1 放回来——两条记录各管各的，不会互相干扰。
-
-### 为什么 batchRemove 不能像 removeAt 那样复用现成方法
-
-`removeAt` 要的历史效果和 `removeRectangle` 一模一样（一条记录、一个编号），所以复用是对的。`batchRemove` 要的是一条记录装 n 个编号，复用会变成 n 条记录。
-
-对比一下 `batchRemove(1,1)` 撕掉三张铺满矩形之后的两种历史：
-
-| 写法 | 历史栈 | 一次 undo 之后 getAt(1,1) |
+| 记录 | 来自哪 | undo 做什么 |
 |---|---|---|
-| 自己写一条 | add[1], add[2], add[3], remove[1,2,3] | 3（三张全回来，正确） |
-| 复用 removeRectangle | add[1], add[2], add[3], remove[1], remove[2], remove[3] | 3（只回来 3，1 和 2 还在外面，错） |
-
-第二种的 `getAt` 看起来也是 3，但板子状态是错的：此时 `removeRectangle(1)` 会返回 false，而正确状态下应该返回 true。
-
-### 这四问加完，哪些代码被改过
-
-只有 add 和 remove 各加了一行写历史（第二问），其余全是新增方法。第一问定下的"存矩形不存格子 + 编号即层次"没有被任何一问推翻。这就是这道题真正的考点。
+| ("add", [5]) | addRectangle | 5 的 active 改 False |
+| ("remove", [5]) | removeRectangle / removeAt | 5 的 active 改 True |
+| ("remove", [1,2,7]) | batchRemove | 1、2、7 的 active 都改 True |

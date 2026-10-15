@@ -1,83 +1,48 @@
 # 第一问：单局，先跑对、不违规
 
-## 面试官给的骨架
+## 这一问要做什么
 
-题面没有附代码，按签名还原（原题是 Java 的 `String check(int guess)`）：
+- 写 find_number(upper_bound, server)：答案是 1 到 upper_bound 之间的一个整数，反复调 server.check(guess) 把它找出来并返回。
+- check 的返回说的是上一次交的数：第一次返回 PENDING，之后返回上一次那个数是 TOO_LOW、TOO_HIGH 还是 CORRECT。
+- 这一问只要求一定答对、每次交的数在 1 到 upper_bound 之间、不和之前交过的重复；调几次不管。
 
-```python
-class GuessServer:
-    def check(self, guess: int) -> str:
-        """返回 "PENDING" / "TOO_LOW" / "TOO_HIGH" / "CORRECT"。
-        说的是上一次交的数，不是这次的。"""
+## 核心思路
 
+- 接口 find_number(upper_bound, server)：server.check(guess) 返回的是上一次交的那个数的结果，第一次返回 PENDING。每次调用都必须交一个新数，没有空调用。
+- 三个变量：lo、hi 是还可能是答案的区间，pending 是已经交出去、结果还没回来的那个数。
+- 每轮先看 lo == hi，是就直接返回 lo，不多调一次确认；否则 guess 取中点 (lo + hi) // 2，撞上 pending 就挪 1（先试 +1，到 hi 了就 -1）。
+- 调 check(guess) 拿到的是 pending 的结果：CORRECT 返回 pending；TOO_LOW 把 lo 抬到 pending + 1；TOO_HIGH 把 hi 压到 pending - 1。最后 pending = guess。
+- lo 用 max、hi 用 min：pending 取自上一轮缩小前的区间，可能已经在区间外，它的结果不能让区间往回扩。
+- 不重复只靠躲 pending：每个有结果的数都被 lo 或 hi 挤出了区间，区间里唯一猜过的数就是 pending。
+- 复杂度：O(1) 空间；最坏约 2 × log2(n) 次调用，upper_bound 1e9 要 58 次。
 
-def find_number(upper_bound: int, server: GuessServer) -> int:
-    ...
-```
+## 思考与反问
 
-## 思路
+- 返回值说的是哪个数？按"上一次交的数"做，第一次调用只换回 PENDING。所以代码里 resp 配 pending，不配刚交的 guess。
+- 能不能重复猜、能不能越界？都按不行做，tests 里的 GuessServer 当裁判，违反直接 assert。guess 永远取在 [lo, hi] 里就不越界；撞 pending 挪 1 就不重复，不挪的话第 2 次调用区间还没变，中点和第 1 次交的是同一个数。
+- 要不要收到 CORRECT 才算答出来？按不要求做，lo == hi 直接返回。要求的话 upper_bound = 2 做不到：1 和 2 都交过，没有第三个合法的数去换回最后那个结果。
+- 为什么不等上一个结果回来再猜？接口不允许空调用，每次都要交新数，所以总有一个数在路上，这就是 pending 存在的原因。
+- 追问"最坏多少次"：10 要 5 次，1000 要 18，1e6 要 38，1e9 要 58，没有延迟的普通二分是 30。guess 是缩小前区间的中点，结果回来区间砍一半，guess 有一半概率落在砍掉的那半里白扔，平均两次调用才缩一半。
+- 追问"能不能更少"：能，把新数放的位置改成按剩余预算切、不白扔，1e9 从 58 降到 43，这是第二问。
 
-**开口先定的口径。**
+## 测试要点
 
-1. 最少次数按最坏情况算。这决定了第二问优化的目标，第一问先不管次数。
-2. 猜测必须落在 1..upperBound 之内，所以没有"随便交个 0 换一次结果"的写法。这决定了每次都要从候选区间里拿一个真的数。
-3. 信息够了就直接返回，不等最后一个数的结果。这决定了循环的出口是 lo == hi，而不是收到 CORRECT。
+- test_examples_from_problem：题面三个例子 (10, 6)、(50, 17)、(31, 25) 都答对。
+- test_every_secret_small_range：upper_bound 1 到 300 每个 secret 都答对，裁判没报越界或重复；最坏次数和对抗搜索 simple_worst_case 算出的值一致。
+- test_upper_bound_one_needs_no_call：upper_bound = 1 时一次 check 都不调，直接返回 1。
+- test_large_upper_bound：upper_bound 1e9，边界值 1、2、n-1、n 和 200 个随机 secret 都答对，次数不超对抗搜索的最坏值。
+- test_worst_case_table：对抗搜索给出 10 → 5、1000 → 18、1e6 → 38、1e9 → 58，是上面那组数字的来源。
 
-**三个字段。**
+## 更多说明
 
-| 字段 | 是什么 | 怎么变 |
-|---|---|---|
-| lo, hi | 还活着的候选区间 | 收到 pending 的结果就收缩 |
-| pending | 上一次交出去、结果还没回来的数 | 每次调用后换成这次交的数 |
-| guess | 这次要交的数 | 当前区间的中点 |
+### upper_bound = 10，secret = 3 走一遍（最坏 5 次）
 
-**循环体的顺序是固定的**：先挑 guess，调 check，再用返回值去收拾 pending，最后 pending = guess。顺序不能反，因为返回值说的是 pending，而挑 guess 的时候 pending 的结果还没到。
-
-**两个必须处理的坑。**
-
-第一个是重复猜。中点可能正好等于 pending：pending 的结果没回来，它还在区间里，不能排除。这时挪一格。为什么挪一格就一定安全：除了 pending，区间里不可能有任何用过的数。任何已经收到结果的猜测，要么是 CORRECT 直接返回了，要么它的结果已经把 lo 推到它右边或把 hi 压到它左边，必然在区间外。所以区间里唯一的"脏数"就是 pending，躲开它就够了，不需要维护一个用过的集合。不这么做的话，upper_bound = 4、secret = 3 时第三次会再交一次 3，服务器直接判违规。
-
-第二个是区间不能往回走。pending 可能在收到结果之前就已经被排除出区间了，因为它是在更宽的区间里挑的。这时它的结果是早就知道的那条，不带新信息。收缩要写 lo = max(lo, pending + 1) 和 hi = min(hi, pending - 1)。不这么做，lo 会被推回去，循环不收敛。
-
-**用 upper_bound = 10、secret = 6 走一遍。**
-
-| 第几次 | 区间 | pending | 交 | 返回 | 收拾 pending 之后 |
+| 调用 | lo, hi | pending | guess | check 返回，说的是 pending | 更新 |
 |---|---|---|---|---|---|
-| 1 | 1..10 | 无 | 5 | PENDING | 区间不变，pending = 5 |
-| 2 | 1..10 | 5 | 6（中点 5 和 pending 撞了，挪到 6） | TOO_LOW | 5 偏小，lo = 6，pending = 6 |
-| 3 | 6..10 | 6 | 8 | CORRECT | 6 对了，返回 6 |
+| 1 | 1, 10 | 无 | 5 | PENDING | pending = 5 |
+| 2 | 1, 10 | 5 | 6，中点 5 撞 pending 挪 1 | TOO_HIGH | hi = 4，pending = 6，已在区间外 |
+| 3 | 1, 4 | 6 | 2 | TOO_HIGH | hi = min(4, 5) = 4 没变，白扔 |
+| 4 | 1, 4 | 2 | 3，中点 2 撞 pending 挪 1 | TOO_LOW | lo = 3，pending = 3 |
+| 5 | 3, 4 | 3 | 4，中点 3 撞 pending 挪 1 | CORRECT | 返回 pending = 3 |
 
-这局运气好，3 次。upper_bound = 10 最坏要 5 次。
-
-**这版的代价。** 一个中点的结果要等到下一次调用才到，而下一次交的数是在不知道结果的情况下挑的，有一半概率落到被排除的那一半里、白花。大致是两次调用换一次对半砍。实测最坏次数（穷举每个 secret，并用 tests.py 里的对抗搜索确认）：
-
-| upper_bound | 第一问最坏次数 | 普通二分（无延迟） |
-|---|---|---|
-| 10 | 5 | 4 |
-| 1,000 | 18 | 10 |
-| 1,000,000 | 38 | 20 |
-| 1,000,000,000 | 58 | 30 |
-
-**复杂度。** 每次调用 O(1)，调用次数约 2 乘 log2(n)，额外空间 O(1)。
-
-## 常见疑问
-
-### 返回值不是说 guess 的吗，为什么代码先挑 guess 再看 resp
-
-返回值不说 guess，说的是 pending。角色是这样的：我们是调用方，服务器是被调方；服务器手里永远记着一个"在等结果的数"，每次 check 它先把那个数的结果返回，再把新交的数记下来。所以一次调用的两件事是分开的：交的是 guess，收的是 pending 的结果。
-
-用 upper_bound = 10、secret = 6 的第 2 次调用看：交 6，服务器记着的是 5，它回 TOO_LOW 说的是 5；回完之后它记着的变成 6。代码里 resp 用来收缩区间时，拿来比较的是 pending（也就是 5），不是 guess。
-
-### 为什么去重不用维护一个集合
-
-因为"用过的数"只有两类：收到结果的、和正在等结果的。收到结果的数一定在区间外，上面讲过。正在等结果的只有一个，就是 pending。所以"区间里的数除了 pending 都没用过"是一条始终成立的性质，每次从区间里挑一个不等于 pending 的数就一定不重复。
-
-| 时刻 | 用过的数 | 区间 | 区间里用过的 |
-|---|---|---|---|
-| 交 5 后 | 5 | 1..10 | 5，它是 pending |
-| 交 6、收到 5 偏小后 | 5, 6 | 6..10 | 6，它是 pending；5 在区间外 |
-| 交 8、收到 6 对了 | 5, 6, 8 | 返回 | |
-
-### lo 用 max 是在防什么
-
-防 pending 已经出了区间的情况。例子：upper_bound = 10，secret = 2。第 1 次交 5。第 2 次中点撞 pending，交 6，收到 5 偏大，hi = 4，区间 1..4，pending = 6 已经在区间外。第 3 次交中点 2，收到 6 的结果 TOO_HIGH，这是早就知道的事。如果写成 hi = pending - 1 = 5，hi 就从 4 退回 5，区间变大了。写成 hi = min(hi, pending - 1) = min(4, 5) = 4，区间不动。
+第 3 次就是白扔的那种调用：6 已经不在 [1, 4] 里，它的结果不带新信息。secret = 6 时只要 3 次：check(5) 换回 PENDING，check(6) 换回 5 的 TOO_LOW，check(8) 换回 6 的 CORRECT。

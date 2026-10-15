@@ -1,63 +1,55 @@
 # 第3问：按单元格移除
 
-## 面试官给的骨架
+## 这一问要做什么
 
-```
-int removeAt(int x, int y)
-```
+- 加 removeAt(x, y)：把这格最上面那张整张撕掉，返回它的编号；这格没有矩形返回 -1。
+- 成功的 removeAt 在 undo 历史里算一条，和 removeRectangle 一样；点到空格子不算。
 
-其余方法完全不变。
+## 核心思路
 
-## 思路
+- 接口加一个 removeAt(x, y)，返回被撕掉的编号，空格子返回 -1。其余方法一行没改。
+- 没有新字段。"这格最上面那张"就是 getAt(x, y) 的答案，选中规则和它完全同义。
+- removeAt：rid = getAt(x, y)；rid == -1 直接返回 -1，不动板子不记历史；否则调 removeRectangle(rid)，返回 rid。
+- removeRectangle 的返回值不检查：rid 来自 getAt，一定 active，removeRectangle 一定返回 True。
+- 历史里 removeAt 和 removeRectangle 没区别，都是一条 ("remove", [rid])，所以写历史的代码仍只有 removeRectangle 一处。
+- 复杂度：一次 getAt，O(n)；后面翻标记和 append 都 O(1)。
 
-### 开口先定的口径
+## 思考与反问
 
-- 点在重叠的格子上，撕掉哪几张？**只撕最上面那一张**，整张撕掉，不是只撕它在这格上的那一块。
-- 这格是空的怎么办？返回 -1，而且**不许留历史记录**。
-- 成功的 `removeAt` 和成功的 `removeRectangle` 在历史里有区别吗？**没有**。题目原话：A successful removeAt call is one operation in the existing undo history，撤销它要把同一张矩形放回原来那一层。
+- 点在重叠格上撕哪几张？按只撕最上面那一张、整张撕，全部撕是第四问 batchRemove 的事。这决定了 removeAt 用 getAt 选中，不自己扫。
+- 这格是空的怎么办？按返回 -1 且不记历史。占了历史的话紧接着的 undo 会空跑一次返回 True，后面所有撤销错位一格。
+- 成功的 removeAt 在历史里和 removeRectangle 有区别吗？按没有，题目说 one operation in the existing undo history。这决定了 removeAt 复用 removeRectangle 而不是自己写历史。
+- 不复用、自己翻标记自己写历史会怎样：写历史变成两处，第四问再加一处是三处，改历史格式时三处容易不一致。
+- 追问：撤销 removeAt 后矩形回到最上面还是原来那层？原来那层。三张铺满，removeRectangle(3) 再 removeAt(1,1) 拿走 2，undo 后 getAt(1,1) 是 2 不是 3，3 还在撕掉状态。
+- 追问：removeAt 返回 -1 和 removeRectangle 返回 False 是一回事吗？都表示什么都没做、不改板子不记历史，只是返回类型一个 int 一个 boolean。
 
-最后这条口径决定了代码的形状：既然历史里没区别，那 `removeAt` 就不该自己写历史，而应该调用 `removeRectangle`，让写历史的逻辑只有一处。
+## 测试要点
 
-### 两行拼起来
+- test_remove_at_official_example：removeAt(2,1) 撕掉整张 2 返回 2，露出 1；undo 后 2 回到 1 上面；removeAt(0,2) 空格子返回 -1。
+- test_remove_at_only_takes_the_top_one：三张铺满，连点两次 (1,1) 依次拿走 3、2，剩 1。
+- test_remove_at_removes_whole_rectangle：在 (1,1) 点掉中间那张 2，它在 (2,2) 的格子也一起消失。
+- test_remove_at_miss_writes_no_history：点空格子返回 -1 后，第一次 undo 撤销的是 add，不是那次空点击。
+- test_remove_at_undo_restores_middle_layer：先 removeRectangle(3) 再 removeAt 拿走 2，undo 后 getAt 是 2；再 undo 放回 3 才是 3。
 
-"这格最上面那张是谁"已经有现成答案了，就是 `getAt(x, y)`。所以：
-
-| 步骤 | 做什么 | 为什么 |
-|---|---|---|
-| 1 | `rid = self.getAt(x, y)` | 选中规则和 getAt 的"最上面"完全同义 |
-| 2 | `rid == -1` 就直接返回 -1 | 空格子不动板子、不记历史 |
-| 3 | `self.removeRectangle(rid)` | 翻标记 + 写历史都在它里面 |
-| 4 | 返回 `rid` | 题目要返回被撕掉的编号 |
-
-第 3 步不检查返回值：`rid` 来自 `getAt`，它一定是活跃的，`removeRectangle` 一定返回 true。
-
-不复用 `removeRectangle`、自己翻标记自己写历史，会怎样？代码会变成两处写历史。第四问再加一处，就是三处——以后任何一处改了历史格式，另外两处就不一致。
+## 更多说明
 
 ### 走一遍题目的例子
 
-4 列 3 行，矩形 1 占 `(1,0)-(2,1)`，矩形 2 占 `(2,1)-(3,2)`。
+4 列 3 行，矩形 1 占 (1,0)-(2,1)，矩形 2 占 (2,1)-(3,2)。
 
-| 调用 | getAt 内部得到 | 历史栈 | 返回 |
+| 调用 | getAt 内部得到 | history | 返回 |
 |---|---|---|---|
-| removeAt(2,1) | 2（这格最上面） | add[1], add[2], remove[2] | 2 |
-| getAt(2,1) | 1（2 走了露出 1） | 不变 | 1 |
-| undo | — | add[1], add[2] | true |
-| getAt(2,1) | 2（编号大的自动回到上面） | 不变 | 2 |
-| removeAt(0,2) | -1（这格没人盖） | **不变** | -1 |
+| removeAt(2,1) | 2 | add[1], add[2], remove[2] | 2 |
+| getAt(2,1) | 1，2 走了露出 1 | 不变 | 1 |
+| undo | — | add[1], add[2] | True |
+| getAt(2,1) | 2，编号大自动回到上面 | 不变 | 2 |
+| removeAt(0,2) | -1，这格没人盖 | 不变 | -1 |
 
-最后一行是最容易丢分的地方：那次空点击不能占一条历史。占了的话，紧接着的一次 `undo` 会白跑一趟（什么都没撤销却返回 true），后面所有撤销全部错位一格。
+最后一行那次空点击不占历史，是这一问最容易丢分的地方。
 
-### 复杂度
+### 连点同一格
 
-`removeAt` 就是一次 `getAt`，O(n)，n 是累计添加过的矩形数。后面两步都是 O(1)。
-
-## 常见疑问
-
-### 为什么只撕最上面一张，而不是这格上的全部
-
-题目原话：The selected cell identifies the topmost active rectangle covering it。这是"鼠标点一下选中一个图层"的语义——一次点击选中一个对象。全部撕掉是第四问 `batchRemove` 的事。
-
-三张铺满整板的矩形，连点三次：
+三张铺满整板，连点 (1,1)：
 
 | 调用 | 返回 | 之后 getAt(1,1) |
 |---|---|---|
@@ -66,12 +58,4 @@ int removeAt(int x, int y)
 | removeAt(1,1) | 1 | -1 |
 | removeAt(1,1) | -1 | -1 |
 
-每次只拿走一层，第四次没东西可拿，返回 -1 并且不记历史。
-
-### 撤销一次 removeAt，矩形回到最上面还是回到原来那层
-
-回到原来那层。把三张铺满的矩形先 `removeRectangle(3)`，再 `removeAt(1,1)` 拿走 2，然后 `undo`：2 回来以后 `getAt(1,1)` 是 2 而不是 3，因为 3 还在"已撕掉"的状态；再 `undo` 一次把 3 放回来，`getAt(1,1)` 才变成 3。全程没有任何代码在管层次，都是编号大小自动排出来的。
-
-### removeAt 返回 -1 和 removeRectangle 返回 false 有什么关系
-
-两个都是"什么都没做"的信号，只是类型不同：`removeAt` 返回 int，所以用 -1；`removeRectangle` 返回 boolean，所以用 false。共同点是两者都不改板子、不写历史。
+每次只拿走一层，第四次没东西可拿，返回 -1 且不记历史。
